@@ -61,7 +61,7 @@ def draw(img, max_side_len=18):
     '''
     n, m = img.shape
     plt.axis([0, m, 0, n])
-    options = dict(cmap='tab20b')
+    options = dict(cmap='viridis') # tab20b
     options['extent'] = [0, m, 0, n]
 
     # plot
@@ -155,7 +155,8 @@ class PetriDish:
                 current_locations[x, y] = 1
                 if a.returning_home: current_locations[x, y] += 1
 
-            self.steps.append(current_locations)
+            # self.steps.append(current_locations)
+            self.steps.append(np.copy(self.slime))
             n_steps += 1
             no_food = self.food.sum() == 0
             all_agents_home = all([a.is_home for a in agents])
@@ -224,10 +225,19 @@ class PetriDish:
         '''
         assert isinstance(interval, int), 'interval must be an integer.'
         fig = plt.gcf()
-        global image
+        # global image
         image = draw(self.steps[0])
 
-        return FuncAnimation(fig, func=animate_func, init_func=init_func, frames=self.steps, interval=interval)
+        return FuncAnimation(fig, func=self.animate_func, init_func=init_func, frames=enumerate(self.steps), interval=interval)
+
+    def animate_func(self, e):
+        '''Draws one frame of the animation.
+        Credit: Alen Downey.
+        '''
+        x, img = e
+        if (x % 10) == 0: print(x)
+        # image.set_array(self.steps[x])
+        return plt.imshow(img)
 
 
 class Agent:
@@ -289,7 +299,7 @@ class Agent:
         if self.is_home and petri.food.sum() == 0:
             pass
         elif self.returning_home or petri.food.sum() == 0:
-            self.next_step_home(petri)
+            self.semi_random_step_home(petri)
         else:
             xs, ys = self.get_field_of_view(petri)
             fov_foods = petri.food[xs[0]:xs[1], ys[0]:ys[1]]
@@ -307,6 +317,21 @@ class Agent:
         - petri (PetriDish object):
             The current PetriDish that the agent is running around in.
         '''
+        dir_weights = self.semi_random_step_forward(petri, self.direction)
+        self.direction = np.array(np.unravel_index(dir_weights.argmax(), dir_weights.shape)) - 1
+
+        self.move(petri, set_pheromones=False)
+
+    def semi_random_step_forward(self, petri, desired_direction):
+        '''Return direction weights.
+
+        Parameters
+        ----------
+        - petri (PetriDish object):
+            The current PetriDish that the agent is running around in.
+        - desired_direction (np array of shape (2,)):
+            The desired direction that the agent should trend towards.
+        '''
         assert petri.shape == self.shape, 'Shape of PetriDish does not match shape of SlimeAgent.'
         x, y = self.loc
         edges = petri.edges[x:x+3, y:y+3]
@@ -318,21 +343,20 @@ class Agent:
         dir_weights = (np.random.uniform(size=(3, 3)) + phero * self.p_strength) * queen
 
         if edges.min() != 0:
-            x, y = self.direction + 1
+            x, y = desired_direction + 1
             dir_weights[x, y] += self.forward_bias
 
-            if np.abs(self.direction).sum() == 2:
-                rotation = (self.direction * rotor).sum() + np.clip(self.direction.sum(), 0, 2)
+            if np.abs(desired_direction).sum() == 2:
+                rotation = (desired_direction * rotor).sum() + np.clip(desired_direction.sum(), 0, 2)
                 dir_weights *= np.rot90(el, rotation)
             else:
-                rotation = np.clip(self.direction[0], 0, 1) + self.direction[0] + self.direction[1] * -1
+                rotation = np.clip(desired_direction[0], 0, 1) + desired_direction[0] + desired_direction[1] * -1
                 dir_weights *= np.rot90(row, rotation)
         else:
             dir_weights *= edges
 
-        self.direction = np.array(np.unravel_index(dir_weights.argmax(), dir_weights.shape)) - 1
+        return dir_weights
 
-        self.move(petri, set_pheromones=False)
 
     def next_step_home(self, petri):
         '''Make the fasted possible step home.
@@ -347,15 +371,17 @@ class Agent:
 
     def semi_random_step_home(self, petri):
         '''Take a semi-random step in rough direction of home.
-        NOT IMPLEMENTED.
+        Testing.
 
         Parameters
         ----------
         - petri (PetriDish object):
             The current PetriDish that the agent is running around in.
         '''
-        dist_to_home = self.home - self.loc
-        self.direction = ...
+        desired_direction = np.clip(self.home - self.loc, -1, 1)
+
+        dir_weights = self.semi_random_step_forward(petri, desired_direction)
+        self.direction = np.array(np.unravel_index(dir_weights.argmax(), dir_weights.shape)) - 1
 
         self.move(petri, set_pheromones=True, move_type='semi random home')
 
